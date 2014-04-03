@@ -2,14 +2,13 @@
  * William DURAND <william.durand1@gmail.com>
  * MIT Licensed
  */
-var Translator = (function(document, undefined) {
+var Translator = (function(document) {
     "use strict";
 
     var _messages     = {},
-        _domains      = [],
-        _sPluralRegex = new RegExp(/^\w+\: +(.+)$/),
-        _cPluralRegex = new RegExp(/^\s*((\{\s*(\-?\d+[\s*,\s*\-?\d+]*)\s*\})|([\[\]])\s*(-Inf|\-?\d+)\s*,\s*(\+?Inf|\-?\d+)\s*([\[\]]))\s?(.+?)$/),
-        _iPluralRegex = new RegExp(/^\s*(\{\s*(\-?\d+[\s*,\s*\-?\d+]*)\s*\})|([\[\]])\s*(-Inf|\-?\d+)\s*,\s*(\+?Inf|\-?\d+)\s*([\[\]])/);
+        _sPluralRegex = /^\w+\: +(.+)$/,
+        _cPluralRegex = /^\s*((\{\s*(\-?\d+[\s*,\s*\-?\d+]*)\s*\})|([\[\]])\s*(-Inf|\-?\d+)\s*,\s*(\+?Inf|\-?\d+)\s*([\[\]]))\s?(.+?)$/,
+        _iPluralRegex = /^\s*(\{\s*(\-?\d+[\s*,\s*\-?\d+]*)\s*\})|([\[\]])\s*(-Inf|\-?\d+)\s*,\s*(\+?Inf|\-?\d+)\s*([\[\]])/;
 
     /**
      * Replace placeholders in given message.
@@ -31,6 +30,7 @@ var Translator = (function(document, undefined) {
 
             if (_r.test(message)) {
                 message = message.replace(_r, placeholders[_i]);
+                delete(placeholders[_i]);
             }
         }
 
@@ -46,35 +46,31 @@ var Translator = (function(document, undefined) {
      * @param {String} locale           The locale or null to use the default
      * @param {String} currentLocale    The current locale or null to use the default
      * @param {String} localeFallback   The fallback (default) locale
+     * @param {String} defaultDomain    Default domain
      * @return {String}                 The right message if found, `undefined` otherwise
      * @api private
      */
-    function get_message(id, domain, locale, currentLocale, localeFallback) {
+    function get_message(id, domain, locale, currentLocale, localeFallback, defaultDomain) {
         var _locale = locale || currentLocale || localeFallback,
-            _domain = domain;
+            _domain = domain || defaultDomain;
 
-        if (undefined == _messages[_locale]) {
-            if (undefined == _messages[localeFallback]) {
+        if (undefined === _messages[_locale]) {
+            if (undefined === _messages[localeFallback]) {
                 return id;
             }
 
             _locale = localeFallback;
         }
 
-        if (undefined === _domain || null === _domain) {
-            for (var i = 0; i < _domains.length; i++) {
-                if (undefined != _messages[_locale][_domains[i]] &&
-                    undefined != _messages[_locale][_domains[i]][id]) {
-                    _domain = _domains[i];
-
-                    break;
-                }
-            }
-        }
-
-        if (undefined != _messages[_locale][_domain] &&
-            undefined != _messages[_locale][_domain][id]) {
+        if (undefined !== _messages[_locale][_domain] &&
+            undefined !== _messages[_locale][_domain][id]) {
             return _messages[_locale][_domain][id];
+        }
+        if (_locale != localeFallback) {
+            if (undefined !== _messages[localeFallback][_domain] &&
+                undefined !== _messages[localeFallback][_domain][id]) {
+                return _messages[localeFallback][_domain][id];
+            }
         }
 
         return id;
@@ -116,12 +112,14 @@ var Translator = (function(document, undefined) {
 
         for (_p in _parts) {
             var _part = _parts[_p];
+            var _rc = new RegExp(_cPluralRegex);
+            var _rs = new RegExp(_sPluralRegex);
 
-            if (_cPluralRegex.test(_part)) {
-                _matches = _part.match(_cPluralRegex);
+            if (_rc.test(_part)) {
+                _matches = _part.match(_rc);
                 _explicitRules[_matches[0]] = _matches[_matches.length - 1];
-            } else if (_sPluralRegex.test(_part)) {
-                _matches = _part.match(_sPluralRegex);
+            } else if (_rs.test(_part)) {
+                _matches = _part.match(_rs);
                 _standardRules.push(_matches[1]);
             } else {
                 _standardRules.push(_part);
@@ -129,8 +127,10 @@ var Translator = (function(document, undefined) {
         }
 
         for (_e in _explicitRules) {
-            if (_iPluralRegex.test(_e)) {
-                _matches = _e.match(_iPluralRegex);
+            var _r = new RegExp(_iPluralRegex);
+
+            if (_r.test(_e)) {
+                _matches = _e.match(_r);
 
                 if (_matches[1]) {
                     var _ns = _matches[2].split(','),
@@ -168,9 +168,9 @@ var Translator = (function(document, undefined) {
      */
     function convert_number(number) {
         if ('-Inf' === number) {
-            return Number.NEGATIVE_INFINITY;
+            return Math.log(0);
         } else if ('+Inf' === number || 'Inf' === number) {
-            return Number.POSITIVE_INFINITY;
+            return -Math.log(0);
         }
 
         return parseInt(number, 10);
@@ -328,23 +328,6 @@ var Translator = (function(document, undefined) {
     }
 
     /**
-     * @type {Array}        An array
-     * @type {String}       An element to compare
-     * @return {Boolean}    Return `true` if `array` contains `element`,
-     *                      `false` otherwise
-     * @api private
-     */
-    function exists(array, element) {
-        for (var i = 0; i < array.length; i++) {
-            if (element === array[i]) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
      * Get the current application's locale based on the `lang` attribute
      * on the `html` tag.
      *
@@ -415,7 +398,7 @@ var Translator = (function(document, undefined) {
          * @api public
          */
         add: function(id, message, domain, locale) {
-            var _locale = locale || this.locale || this.fallback,
+            var _locale = locale || this.locale || this.fallback,
                 _domain = domain || this.defaultDomain;
 
             if (!_messages[_locale]) {
@@ -427,10 +410,6 @@ var Translator = (function(document, undefined) {
             }
 
             _messages[_locale][_domain][id] = message;
-
-            if (false === exists(_domains, _domain)) {
-                _domains.push(_domain);
-            }
 
             return this;
         },
@@ -452,7 +431,8 @@ var Translator = (function(document, undefined) {
                 domain,
                 locale,
                 this.locale,
-                this.fallback
+                this.fallback,
+                this.defaultDomain
             );
 
             return replace_placeholders(_message, parameters || {});
@@ -475,12 +455,13 @@ var Translator = (function(document, undefined) {
                 domain,
                 locale,
                 this.locale,
-                this.fallback
+                this.fallback,
+                this.defaultDomain
             );
 
             var _number  = parseInt(number, 10);
 
-            if (undefined != _message && !isNaN(_number)) {
+            if (undefined !== _message && !isNaN(_number)) {
                 _message = pluralize(
                     _message,
                     _number,
@@ -533,11 +514,10 @@ var Translator = (function(document, undefined) {
          */
         reset: function() {
             _messages   = {};
-            _domains    = [];
             this.locale = get_current_locale();
         }
     };
-})(document, undefined);
+})(document);
 
 if (typeof window.define === 'function' && window.define.amd) {
     window.define('Translator', [], function() {
